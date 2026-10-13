@@ -1,0 +1,34 @@
+# >>> baker:cs3704-art-reference-archive >>>
+# Generated submission artifacts
+cs3704-submission-*.zip
+cs3704-submission-*/
+
+# Session transcripts and summaries (auto-exported on submit)
+session-*.json
+session-*.md
+session-summary.md
+
+# Student-generated logs (these are .gitignored, but will be included with assignment submissions)
+concept-explain-log.jsonl
+teacher-log.jsonl
+learning-log.jsonl
+
+# Student-generated learning goals (these are .gitignored, but will be included with assignment submissions)
+learning-goal.md
+team-goal.md
+semester-goal.md
+
+# opencode runtime (auto-generated dependency files)
+.opencode/node_modules/
+.opencode/package.json
+.opencode/package-lock.json
+.opencode/bun.lock
+.env
+
+# Local workspace and temp files
+.tmp/
+tmp/
+
+# Baker
+.baker*
+# <<< baker:cs3704-art-reference-archive <<<
