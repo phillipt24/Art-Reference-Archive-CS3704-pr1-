@@ -24,6 +24,17 @@
     </div>
   </fieldset>
 
+  <!-- BULK UPLOAD SECTION -->
+  <fieldset style="margin-bottom: 20px; padding: 15px; background: white; border-radius: 6px;">
+    <legend><strong>Bulk Upload (ZIP)</strong></legend>
+    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+      <input type="file" id="zipInput" accept=".zip">
+      <button onclick="uploadZip()" style="padding: 6px 16px; cursor: pointer;">Import ZIP</button>
+    </div>
+    <p id="zipReport" style="font-weight: bold;"></p>
+    <ul id="zipFailures"></ul>
+  </fieldset>
+
   <!-- RANDOM PICTURE SECTION -->
   <fieldset style="margin-bottom: 20px; padding: 15px; background: white; border-radius: 6px; text-align: center;">
     <legend><strong>Random Picture Viewer</strong></legend>
@@ -100,6 +111,41 @@
       if (response.ok) {
         fileInput.value = "";
         tagInput.value = "";
+      }
+    }
+
+    async function uploadZip() {
+      const zipInput = document.getElementById("zipInput");
+      const file = zipInput.files[0];
+
+      if (!file) return;
+
+      const formData = new FormData();
+      formData.append("archive", file);
+
+      const reportEl = document.getElementById("zipReport");
+      const list = document.getElementById("zipFailures");
+      reportEl.textContent = "Importing...";
+      list.innerHTML = "";
+
+      const response = await fetch("/api/import-zip", { method: "POST", body: formData });
+      let report;
+      try {
+        report = await response.json();
+      } catch {
+        reportEl.textContent = "The import failed (server error " + response.status + ").";
+        return;
+      }
+
+      reportEl.textContent = report.message || report.error;
+      for (const failure of report.failures || []) {
+        const item = document.createElement("li");
+        item.textContent = `${failure.archive_path}: ${failure.reason}`;
+        list.appendChild(item);
+      }
+
+      if (response.ok) {
+        zipInput.value = "";
       }
     }
 
@@ -238,6 +284,10 @@
     async function loadGallery() {
       const tags = document.getElementById("galleryTags").value;
       const response = await fetch(`/api/pictures?tags=${encodeURIComponent(tags)}`);
+      if (!response.ok) {
+        alert("The archive could not be loaded.");
+        return;
+      }
       galleryImages = await response.json();
 
       if (galleryImages.length === 0) {
