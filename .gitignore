@@ -32,9 +32,3 @@ tmp/
 # Baker
 .baker*
 # <<< baker:cs3704-art-reference-archive <<<
-
-# Python
-__pycache__/
-.pytest_cache/
-.venv/
-data.json.tmp
