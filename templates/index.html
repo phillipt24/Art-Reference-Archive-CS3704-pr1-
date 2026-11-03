@@ -88,7 +88,21 @@
       <div>
         <img id="galleryImage" src="" alt="Gallery Reference" style="max-width: 100%; max-height: 500px; border-radius: 4px;">
         <p id="galleryImageTags" style="font-weight: bold;"></p>
+        <button id="editGalleryTagsBtn" style="padding: 6px 16px; cursor: pointer;" onclick="openTagEditor()">Edit Tags</button>
         <button id="deleteGalleryBtn" style="padding: 6px 16px; cursor: pointer;" onclick="deleteGalleryPicture()">Delete From Gallery</button>
+        <p id="tagEditorMessage" style="font-weight: bold; color: #b00020;"></p>
+      </div>
+
+      <!-- TAG EDITOR (US-002) -->
+      <div id="tagEditor" style="display: none; margin-top: 10px; padding: 10px; border: 1px solid #ccc; border-radius: 4px;">
+        <div id="tagEditorTags" style="display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; margin-bottom: 10px;"></div>
+        <div style="display: flex; gap: 10px; justify-content: center; margin-bottom: 10px;">
+          <input type="text" id="tagEditorInput" placeholder="Add tags (e.g. sky, water)" style="width: 50%; padding: 6px;"
+                 onkeydown="if (event.key === 'Enter') addEditorTags()">
+          <button onclick="addEditorTags()" style="padding: 6px 12px; cursor: pointer;">Add</button>
+        </div>
+        <button onclick="saveTagEdit()" style="padding: 6px 16px; cursor: pointer;">Save</button>
+        <button onclick="closeTagEditor()" style="padding: 6px 16px; cursor: pointer;">Cancel</button>
       </div>
     </div>
   </fieldset>
@@ -282,6 +296,7 @@
     let galleryIndex = 0;
 
     async function loadGallery() {
+      setEditorMessage("");
       const tags = document.getElementById("galleryTags").value;
       const response = await fetch(`/api/pictures?tags=${encodeURIComponent(tags)}`);
       if (!response.ok) {
@@ -307,20 +322,136 @@
         return;
       }
 
+      closeTagEditor();
       const current = galleryImages[galleryIndex];
       document.getElementById("galleryImage").src = `/uploads/${current.filename}`;
       document.getElementById("galleryImageTags").innerText = "Tags: " + (current.tags.join(", ") || "None");
       document.getElementById("galleryCounter").innerText = `${galleryIndex + 1} / ${galleryImages.length}`;
     }
 
+    // ---------- Tag editor (US-002) ----------
+    // Edits happen on a local copy; nothing is sent until Save, so Cancel
+    // (or navigating away) leaves the stored tags untouched (AC 12).
+    let editorTags = [];
+
+    function normalizeTags(raw) {
+      const tags = [];
+      for (const part of raw.split(",")) {
+        const tag = part.trim().toLowerCase();
+        if (tag && !tags.includes(tag)) tags.push(tag);
+      }
+      return tags;
+    }
+
+    function setEditorMessage(text) {
+      document.getElementById("tagEditorMessage").innerText = text;
+    }
+
+    function openTagEditor() {
+      if (galleryImages.length === 0) return;
+      // Collapse any duplicates already in the stored record (edge case in US-002)
+      editorTags = normalizeTags(galleryImages[galleryIndex].tags.join(","));
+      document.getElementById("tagEditorInput").value = "";
+      setEditorMessage("");
+      renderEditorTags();
+      document.getElementById("tagEditor").style.display = "block";
+    }
+
+    function closeTagEditor() {
+      editorTags = [];
+      document.getElementById("tagEditorInput").value = "";
+      document.getElementById("tagEditor").style.display = "none";
+    }
+
+    function renderEditorTags() {
+      const container = document.getElementById("tagEditorTags");
+      container.innerHTML = "";
+      if (editorTags.length === 0) {
+        container.innerText = "No tags";
+        return;
+      }
+      for (const tag of editorTags) {
+        const chip = document.createElement("span");
+        chip.style.cssText = "background: #e9ecef; border-radius: 12px; padding: 3px 4px 3px 10px;";
+        chip.textContent = tag + " ";
+        const remove = document.createElement("button");
+        remove.textContent = "×";
+        remove.title = `Remove "${tag}"`;
+        remove.style.cssText = "border: none; background: none; cursor: pointer; font-weight: bold;";
+        remove.onclick = () => {
+          editorTags = editorTags.filter(t => t !== tag);
+          setEditorMessage("");
+          renderEditorTags();
+        };
+        chip.appendChild(remove);
+        container.appendChild(chip);
+      }
+    }
+
+    // Moves the input's tags into the pending list. Returns false if nothing valid was entered.
+    function addEditorTags() {
+      const input = document.getElementById("tagEditorInput");
+      const newTags = normalizeTags(input.value);
+      if (newTags.length === 0) {
+        setEditorMessage("A tag cannot be empty.");
+        return false;
+      }
+      const alreadyPresent = newTags.filter(t => editorTags.includes(t));
+      for (const tag of newTags) {
+        if (!editorTags.includes(tag)) editorTags.push(tag);
+      }
+      setEditorMessage(alreadyPresent.length
+        ? `Already present: ${alreadyPresent.join(", ")}`
+        : "");
+      input.value = "";
+      renderEditorTags();
+      return true;
+    }
+
+    async function saveTagEdit() {
+      const current = galleryImages[galleryIndex];
+      if (!current) return;
+
+      // Text still in the input when Save is pressed counts as an add
+      const input = document.getElementById("tagEditorInput");
+      if (input.value !== "" && !addEditorTags()) return;
+
+      const response = await fetch(`/api/pictures/${current.id}/tags`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tags: editorTags })
+      });
+      const result = await response.json().catch(() => ({}));
+
+      if (response.status === 404) {
+        // Picture was deleted elsewhere before Save (edge case in US-002)
+        closeTagEditor();
+        await loadGallery();
+        setEditorMessage(result.error || "This picture no longer exists.");
+        return;
+      }
+      if (!response.ok) {
+        setEditorMessage(result.error || "The tags could not be saved.");
+        return;
+      }
+
+      const keepMessage = document.getElementById("tagEditorMessage").innerText;
+      galleryImages[galleryIndex] = result.picture;
+      closeTagEditor();
+      updateGalleryDisplay();
+      setEditorMessage(keepMessage.startsWith("Already present") ? keepMessage : "");
+    }
+
     function prevGalleryImage() {
       if (galleryImages.length === 0) return;
+      setEditorMessage("");
       galleryIndex = (galleryIndex - 1 + galleryImages.length) % galleryImages.length;
       updateGalleryDisplay();
     }
 
     function nextGalleryImage() {
       if (galleryImages.length === 0) return;
+      setEditorMessage("");
       galleryIndex = (galleryIndex + 1) % galleryImages.length;
       updateGalleryDisplay();
     }
