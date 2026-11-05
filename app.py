@@ -60,6 +60,21 @@ def next_id(data):
     last_allocated_id = max(last_allocated_id + 1, int(time.time() * 1000))
     return last_allocated_id
 
+def normalize_tags(values):
+    """Turn raw tag strings into a clean tag list.
+
+    Each value may hold several comma-separated tags. Tags are trimmed and
+    lowercased, empty ones are dropped, and duplicates are removed keeping
+    the first occurrence's position (data model I3).
+    """
+    tags = []
+    for value in values:
+        for part in value.split(','):
+            tag = part.strip().lower()
+            if tag and tag not in tags:
+                tags.append(tag)
+    return tags
+
 @app.errorhandler(StoreError)
 def handle_store_error(e):
     return jsonify({'error': str(e)}), 500
@@ -81,8 +96,7 @@ def upload_picture():
     if file.filename == '':
         return jsonify({'error': 'No file selected'}), 400
 
-    raw_tags = request.form.get('tags', '')
-    tags = [t.strip().lower() for t in raw_tags.split(',') if t.strip()]
+    tags = normalize_tags([request.form.get('tags', '')])
 
     ext = os.path.splitext(file.filename)[1]
 
@@ -228,8 +242,7 @@ def import_zip():
 
 @app.route('/api/pictures', methods=['GET'])
 def get_pictures():
-    raw_tags = request.args.get('tags', '')
-    search_tags = [t.strip().lower() for t in raw_tags.split(',') if t.strip()]
+    search_tags = normalize_tags([request.args.get('tags', '')])
 
     with data_lock:
         data = load_data()
@@ -246,8 +259,7 @@ def get_pictures():
 
 @app.route('/api/pictures/random', methods=['GET'])
 def get_random_picture():
-    raw_tags = request.args.get('tags', '')
-    search_tags = [t.strip().lower() for t in raw_tags.split(',') if t.strip()]
+    search_tags = normalize_tags([request.args.get('tags', '')])
 
     raw_excludes = request.args.get('exclude_ids', '')
     exclude_ids = [int(i) for i in raw_excludes.split(',') if i.strip().isdigit()]
@@ -275,6 +287,31 @@ def get_random_picture():
 
     selected = random.choice(eligible_choices)
     return jsonify(selected)
+
+@app.route('/api/pictures/<int:picture_id>/tags', methods=['PUT'])
+def update_picture_tags(picture_id):
+    # US-002: the editor sends the picture's complete new tag list on Save,
+    # so a cancelled edit never reaches the server (AC 12).
+    body = request.get_json(silent=True) or {}
+    raw_tags = body.get('tags')
+    if not isinstance(raw_tags, list) or not all(isinstance(t, str) for t in raw_tags):
+        return jsonify({'error': 'Tags must be a list of strings.'}), 400
+
+    for value in raw_tags:
+        if not normalize_tags([value]):
+            return jsonify({'error': 'A tag cannot be empty.'}), 400
+    tags = normalize_tags(raw_tags)
+
+    with data_lock:
+        data = load_data()
+        picture = next((img for img in data if img['id'] == picture_id), None)
+        if not picture:
+            return jsonify({'error': 'This picture no longer exists.'}), 404
+
+        picture['tags'] = tags
+        save_data(data)
+
+    return jsonify({'success': True, 'picture': picture})
 
 @app.route('/api/pictures/<int:picture_id>', methods=['DELETE'])
 def delete_picture(picture_id):
