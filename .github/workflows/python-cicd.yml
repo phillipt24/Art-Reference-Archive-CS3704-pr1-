@@ -1,7 +1,7 @@
 name: Python CI - Code Quality
 run-name: Perform CI/CD workflow
 
-on:
+"on":
   push:
     branches:
       - main
