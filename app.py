@@ -207,16 +207,17 @@ def import_archive(upload):
     valid_entries, failures, examined, total = [], [], 0, 0
     with archive:
         for info in archive_entries(archive):
+            normalized_path = info.filename.replace('\\', '/')
             examined += 1
             ext, content, reason = read_entry(archive, info)
             if reason:
-                failures.append({'archive_path': info.filename, 'reason': reason})
+                failures.append({'archive_path': normalized_path, 'reason': reason})
                 continue
             total += len(content)
             if total > MAX_EXTRACTED_BYTES:
                 message = 'The archive would extract to more than 500 MB, the extracted-size limit.'
                 return {'imported_count': 0, 'failed_count': 0, 'failures': [], 'message': message}, 400
-            valid_entries.append((info.filename, ext, content))
+            valid_entries.append((normalized_path, ext, content))
 
     added, save_failures = add_pictures(valid_entries) if valid_entries else ([], [])
     failures += save_failures
