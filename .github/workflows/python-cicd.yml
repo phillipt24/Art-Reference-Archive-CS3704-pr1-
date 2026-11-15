@@ -1,6 +1,6 @@
 name: Python CI - Code Quality
 
-on:
+"on":
   push:
     branches:
       - main
