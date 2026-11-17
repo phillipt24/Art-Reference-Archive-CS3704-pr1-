@@ -107,6 +107,14 @@
     </div>
   </fieldset>
 
+  <!-- TRASH (US-004) -->
+  <fieldset style="margin-bottom: 20px; padding: 15px; background: white; border-radius: 6px; text-align: center;">
+    <legend><strong>Trash</strong></legend>
+    <button onclick="loadTrash()" style="padding: 6px 16px; cursor: pointer;">Show Trash</button>
+    <p id="trashMessage" style="font-weight: bold; color: #b00020;"></p>
+    <div id="trashList" style="display: none; flex-direction: column; gap: 15px; align-items: center;"></div>
+  </fieldset>
+
   <script>
 
     async function uploadPicture() {
@@ -198,15 +206,15 @@
       const currentId = randomHistory[0];
       if (!currentId) return;
 
-      if (confirm("Delete this picture?")) {
-        const response = await fetch(`/api/pictures/${currentId}`, { method: "DELETE" });
-        if (response.ok) {
-          document.getElementById("randomImage").style.display = "none";
-          document.getElementById("deleteRandomBtn").style.display = "none";
-          document.getElementById("randomImageTags").innerText = "";
-          document.getElementById("randomPlaceholder").style.display = "block";
-          randomHistory = [];
-        }
+      if (confirm(TRASH_CONFIRM)) {
+        const result = await moveToTrash(currentId);
+        // Stop showing the picture whether it was just trashed or already gone (AC 20)
+        document.getElementById("randomImage").style.display = "none";
+        document.getElementById("deleteRandomBtn").style.display = "none";
+        document.getElementById("randomImageTags").innerText = "";
+        document.getElementById("randomPlaceholder").style.display = "block";
+        randomHistory = [];
+        if (!result.ok) alert(result.error);
       }
     }
 
@@ -282,13 +290,13 @@
       const currentId = timerHistory[0];
       if (!currentId) return;
 
-      if (confirm("Delete this picture?")) {
-        const response = await fetch(`/api/pictures/${currentId}`, { method: "DELETE" });
-        if (response.ok) {
-          timerHistory = [];
-          countdownValue = totalInterval;
-          loadTimerPicture();
-        }
+      if (confirm(TRASH_CONFIRM)) {
+        const result = await moveToTrash(currentId);
+        if (!result.ok) alert(result.error);
+        // Move on to the next picture; the server no longer returns a trashed one (AC 20)
+        timerHistory = [];
+        countdownValue = totalInterval;
+        loadTimerPicture();
       }
     }
 
@@ -460,16 +468,123 @@
       if (galleryImages.length === 0) return;
 
       const current = galleryImages[galleryIndex];
-      if (confirm("Delete this picture from gallery?")) {
-        const response = await fetch(`/api/pictures/${current.id}`, { method: "DELETE" });
-        if (response.ok) {
-          galleryImages.splice(galleryIndex, 1);
-          if (galleryIndex >= galleryImages.length) {
-            galleryIndex = galleryImages.length - 1;
-          }
-          updateGalleryDisplay();
+      if (confirm(TRASH_CONFIRM)) {
+        const result = await moveToTrash(current.id);
+        if (!result.ok) {
+          // Stale view (already trashed or gone elsewhere): refresh, then explain (AC 12)
+          await loadGallery();
+          setEditorMessage(result.error);
+          return;
         }
+        galleryImages.splice(galleryIndex, 1);
+        if (galleryIndex >= galleryImages.length) {
+          galleryIndex = galleryImages.length - 1;
+        }
+        updateGalleryDisplay();
+        setEditorMessage("Moved to trash.");
       }
+    }
+
+    // ---------- Trash (US-004) ----------
+    const TRASH_CONFIRM = "Move this picture to the trash? You can restore it later from the Trash section.";
+
+    // Returns {ok, error}. Refreshes the trash list if it is open.
+    async function moveToTrash(id) {
+      const response = await fetch(`/api/pictures/${id}`, { method: "DELETE" });
+      const result = await response.json().catch(() => ({}));
+      if (trashIsOpen()) await loadTrash();
+      return {
+        ok: response.ok,
+        error: result.error || "The picture could not be moved to the trash."
+      };
+    }
+
+    function trashIsOpen() {
+      return document.getElementById("trashList").style.display !== "none";
+    }
+
+    function setTrashMessage(text) {
+      document.getElementById("trashMessage").innerText = text;
+    }
+
+    async function loadTrash() {
+      const list = document.getElementById("trashList");
+      setTrashMessage("");
+      const response = await fetch("/api/trash");
+      const pictures = await response.json().catch(() => null);
+      if (!response.ok || !Array.isArray(pictures)) {
+        setTrashMessage((pictures && pictures.error) || "The trash could not be loaded.");
+        return;
+      }
+
+      list.innerHTML = "";
+      list.style.display = "flex";
+      if (pictures.length === 0) {
+        list.innerText = "The trash is empty.";
+        return;
+      }
+
+      for (const picture of pictures) {
+        const entry = document.createElement("div");
+        entry.style.cssText = "border: 1px solid #ccc; border-radius: 4px; padding: 10px; width: 100%;";
+
+        if (picture.image_available) {
+          const img = document.createElement("img");
+          img.src = `/uploads/${picture.filename}`;
+          img.alt = picture.filename;
+          img.style.cssText = "max-width: 100%; max-height: 300px; border-radius: 4px;";
+          entry.appendChild(img);
+        } else {
+          // AC 14: entry still listed, marked as unavailable
+          const missing = document.createElement("p");
+          missing.textContent = `Image unavailable (${picture.filename})`;
+          missing.style.fontStyle = "italic";
+          entry.appendChild(missing);
+        }
+
+        const tags = document.createElement("p");
+        tags.style.fontWeight = "bold";
+        tags.textContent = "Tags: " + (picture.tags.join(", ") || "None");
+        entry.appendChild(tags);
+
+        const restoreBtn = document.createElement("button");
+        restoreBtn.textContent = "Restore";
+        restoreBtn.style.cssText = "padding: 6px 16px; cursor: pointer; margin-right: 10px;";
+        restoreBtn.onclick = () => restorePicture(picture);
+        entry.appendChild(restoreBtn);
+
+        const deleteBtn = document.createElement("button");
+        deleteBtn.textContent = "Delete Permanently";
+        deleteBtn.style.cssText = "padding: 6px 16px; cursor: pointer; color: #b00020;";
+        deleteBtn.onclick = () => deletePermanently(picture);
+        entry.appendChild(deleteBtn);
+
+        list.appendChild(entry);
+      }
+    }
+
+    async function restorePicture(picture) {
+      const response = await fetch(`/api/trash/${picture.id}/restore`, { method: "POST" });
+      const result = await response.json().catch(() => ({}));
+      // Reload either way, so a stale list is corrected (AC 16)
+      await loadTrash();
+      setTrashMessage(response.ok
+        ? "Restored. It is back in the gallery."
+        : (result.error || "The picture could not be restored."));
+    }
+
+    async function deletePermanently(picture) {
+      // AC 9: identify the picture and say it cannot be undone; AC 10: cancel changes nothing
+      const ok = confirm(`Permanently delete ${picture.filename}? ` +
+        "It will be removed permanently and this cannot be undone.");
+      if (!ok) return;
+
+      const response = await fetch(`/api/trash/${picture.id}`, { method: "DELETE" });
+      const result = await response.json().catch(() => ({}));
+      await loadTrash();
+      setTrashMessage(response.ok
+        ? "Permanently deleted."
+        : (result.error || "The picture could not be deleted."));
     }
   </script>
 </body>

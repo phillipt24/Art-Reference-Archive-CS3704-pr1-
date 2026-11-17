@@ -384,7 +384,13 @@ def test_corrupt_data_json_is_not_overwritten(client, store):
 
 
 def test_delete_removes_record_and_file(client, store):
+    # US-004 changed DELETE /api/pictures/<id> into a soft delete; the record and
+    # file are now removed only by a permanent delete from the trash.
     write_records(store, [{'id': 1, 'filename': '1.png', 'tags': []}])
     assert client.delete('/api/pictures/1').status_code == 200
+    assert read_records(store) == [{'id': 1, 'filename': '1.png', 'tags': [], 'trashed': True}]
+    assert (store / 'uploads' / '1.png').exists()
+
+    assert client.delete('/api/trash/1').status_code == 200
     assert read_records(store) == []
     assert not (store / 'uploads' / '1.png').exists()
