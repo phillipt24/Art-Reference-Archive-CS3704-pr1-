@@ -75,6 +75,20 @@ def normalize_tags(values):
                 tags.append(tag)
     return tags
 
+def is_active(picture):
+    """US-004: a picture is active unless its record carries "trashed": true.
+
+    Records with no "trashed" key (all records written before US-004) are
+    active, so existing data needs no migration (design doc R1).
+    """
+    return not picture.get('trashed', False)
+
+def image_available(picture):
+    return os.path.isfile(os.path.join(app.config['UPLOAD_FOLDER'], picture['filename']))
+
+def find_picture(data, picture_id):
+    return next((img for img in data if img['id'] == picture_id), None)
+
 @app.errorhandler(StoreError)
 def handle_store_error(e):
     return jsonify({'error': str(e)}), 500
@@ -248,6 +262,9 @@ def get_pictures():
     with data_lock:
         data = load_data()
 
+    # US-004: trashed pictures never appear in the gallery (AC 2, 11)
+    data = [img for img in data if is_active(img)]
+
     if search_tags:
         filtered = [
             img for img in data
@@ -267,6 +284,10 @@ def get_random_picture():
 
     with data_lock:
         data = load_data()
+
+    # US-004: drop trashed pictures before filtering, so neither the tag filter
+    # nor the exclude_ids fallback below can return one (AC 2, 3, 11, 20)
+    data = [img for img in data if is_active(img)]
 
     if search_tags:
         filtered = [
@@ -305,9 +326,12 @@ def update_picture_tags(picture_id):
 
     with data_lock:
         data = load_data()
-        picture = next((img for img in data if img['id'] == picture_id), None)
+        picture = find_picture(data, picture_id)
         if not picture:
             return jsonify({'error': 'This picture no longer exists.'}), 404
+        if not is_active(picture):
+            # A stale gallery tab must not change a trashed picture's tags (US-004 AC 4, 6)
+            return jsonify({'error': 'This picture is in the trash.'}), 409
 
         picture['tags'] = tags
         save_data(data)
@@ -316,20 +340,73 @@ def update_picture_tags(picture_id):
 
 @app.route('/api/pictures/<int:picture_id>', methods=['DELETE'])
 def delete_picture(picture_id):
+    # US-004: the existing Delete control now moves the picture to the trash.
+    # The record keeps its position, tags and file; only the flag is added.
     with data_lock:
         data = load_data()
-        picture_to_delete = next((img for img in data if img['id'] == picture_id), None)
+        picture = find_picture(data, picture_id)
 
-        if not picture_to_delete:
-            return jsonify({'error': 'Picture not found'}), 404
+        if not picture:
+            return jsonify({'error': 'This picture no longer exists.'}), 404
+        if not is_active(picture):
+            return jsonify({'error': 'This picture is already in the trash.'}), 409  # AC 12
+
+        picture['trashed'] = True
+        save_data(data)
+
+    return jsonify({'success': True, 'picture': picture})
+
+@app.route('/api/trash', methods=['GET'])
+def get_trash():
+    with data_lock:
+        data = load_data()
+
+    # Only trashed pictures are listed (AC 11). A missing image file is
+    # reported, not raised, so the trash view still opens (AC 14).
+    trashed = [dict(img, image_available=image_available(img)) for img in data if not is_active(img)]
+    return jsonify(trashed)
+
+@app.route('/api/trash/<int:picture_id>/restore', methods=['POST'])
+def restore_picture(picture_id):
+    with data_lock:
+        data = load_data()
+        picture = find_picture(data, picture_id)
+
+        if not picture:
+            return jsonify({'error': 'This picture no longer exists.'}), 404  # AC 16
+        if is_active(picture):
+            return jsonify({'error': 'This picture is not in the trash.'}), 409  # AC 13
+        if not image_available(picture):
+            # Restoring would put a picture with no image in the gallery (AC 14, data model I4)
+            return jsonify({'error': 'The image for this picture is unavailable, so it cannot be restored.'}), 409
+
+        # Remove the key rather than setting False, so the record is exactly as before the delete
+        del picture['trashed']
+        save_data(data)
+
+    return jsonify({'success': True, 'picture': picture})
+
+@app.route('/api/trash/<int:picture_id>', methods=['DELETE'])
+def delete_permanently(picture_id):
+    with data_lock:
+        data = load_data()
+        picture = find_picture(data, picture_id)
+
+        if not picture:
+            return jsonify({'error': 'This picture no longer exists.'}), 404  # AC 16
+        if is_active(picture):
+            return jsonify({'error': 'This picture is not in the trash.'}), 409
 
         # Save the record removal first, so a crash can't leave a record with no file
-        new_data = [img for img in data if img['id'] != picture_id]
-        save_data(new_data)
+        save_data([img for img in data if img['id'] != picture_id])
 
-        file_path = os.path.join(app.config['UPLOAD_FOLDER'], picture_to_delete['filename'])
-        if os.path.exists(file_path):
-            os.remove(file_path)
+        # A file that is already missing is not an error (AC 15)
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], picture['filename'])
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        except OSError:
+            pass  # the record is gone; an orphaned file is tolerated (data model I4)
 
     return jsonify({'success': True})
 

@@ -82,3 +82,61 @@
 **Q:** Any other disclosures required by the AI policy?
 
 **A:** **[TEAM: who reviewed the diagram against the code, and the team's answers to the three open questions at the end of the document]**
+
+---
+
+# AI Policy Summary – 2026-11-14 (Claude Code session, PM2.3 / US-004 trashcan)
+
+**Q:** Which AI tools (other than Opencode) did you use?
+
+**A:** Claude Code (Anthropic's command-line coding assistant). It used a web-fetch helper agent to read the PM2.1–PM2.3 specs from the course repository. It did **not** run the opencode `@tester` or `@verifier` agents. Those run in opencode and are still to be run by the student.
+
+**Q:** What model names were used?
+
+**A:** `claude-opus-5-5`.
+
+**Q:** For what purposes (code, debugging, docs, etc.)?
+
+**A:** For US-004 (move to trash, restore, permanent delete), from `docs/requirements/US-004-trashcan-soft-delete.md`:
+- Summarized what PM2.3 requires that is new compared with PM2.1 and PM2.2 (CI/CD workflow and agentic verification). Explained what the team's existing `tester`/`verifier` agents and `test`/`verify` skills do, and made a day-by-day plan for PM2.3.
+- Recommended a sequence diagram as the design artifact and an optional `trashed` flag on each record as the way to store trashed state, with the alternatives and why they were rejected.
+- Wrote the design artifact `docs/design/us-004-trashcan-sequence-diagram.md`: three ASCII sequence diagrams (laid out by a small script), message tables, design decisions, required changes to existing code, error paths not drawn, traceability to AC 1–20, and open questions for the team.
+- Wrote the implementation in `app.py`: helpers `is_active`, `image_available`, `find_picture`; `DELETE /api/pictures/<id>` changed to a soft delete; new `GET /api/trash`, `POST /api/trash/<id>/restore`, `DELETE /api/trash/<id>`; trashed pictures excluded from the gallery, random viewer and slideshow; tag edits on trashed pictures rejected. In `templates/index.html` it added a Trash section with Restore and Delete Permanently buttons and a confirmation for permanent delete, and updated the three existing Delete buttons.
+- Rewrote one existing test, `tests/test_zip_import.py::test_delete_removes_record_and_file`, because delete no longer removes the file. It now checks the soft delete, then the permanent delete.
+- Ran the full test suite (88 passed). It also ran a one-off script against a temporary copy of the data to check the new routes (trash, double delete, filters, random viewer, restore, missing image, permanent delete). The team's real `data.json` and `uploads/` were not touched. The UI was **not** tested in a browser.
+- Updated `.opencode/skills/test/SKILL.md` so the tester agent accepts US-004 acceptance criteria and knows where to put the new tests.
+
+**Q:** Approximate proportion of AI-generated vs. human content?
+
+**A:** The design document, the US-004 code in `app.py` and `templates/index.html`, the test change and the skill update were almost entirely AI-generated. The student chose the feature, accepted the recommended design (sequence diagram, `trashed` flag, proposed routes) and asked for the implementation. **[TEAM: any edits you made, and the proportion for the rest of the PM2.3 work]**
+
+**Q:** Any other disclosures required by the AI policy?
+
+**A:** No new US-004 test file was written by Claude Code. The tests and the verification report came from the opencode agents afterwards (see the next section). **[TEAM: who tried the trash feature in a browser and who reviewed the PR]**
+
+---
+
+# AI Policy Summary – 2026-11-14 (opencode agents, PM2.3 / US-004 verification)
+
+**Q:** Which AI tools did you use?
+
+**A:** Opencode, with the team's project agents `@tester` (`.opencode/agents/tester.md`, `test` skill) and `@verifier` (`.opencode/agents/verifier.md`, `verify` skill). The student ran both in opencode, reviewed each plan, and approved each edit and command when asked.
+
+**Q:** What model names were used?
+
+**A:** `@tester`: DeepSeek-V4.1-Flash, as recorded at the top of `tests/test_trashcan.py`. `@verifier`: **[TEAM: model used for the verifier run]**
+
+**Q:** For what purposes (code, debugging, docs, etc.)?
+
+**A:**
+- `@tester` wrote `tests/test_trashcan.py`: 20 tests, one per US-004 acceptance criterion (AC 1–20), each tagged `# AC-US-004-<n>`. They use temporary `data.json`/`uploads/` fixtures, so real data was not touched. The AI-generated note and the prompt are at the top of the file. It did not modify existing tests. The full suite passed (108 tests).
+- `@verifier` ran the quality gates and rewrote `docs/verification-report.md`: unit tests PASS (108 passed), build PASS (app returned HTTP 200 on `/`), traceability PASS (82/85 test functions tagged, 96.47%), coverage 93% (reported only). Overall: **VERIFIED**.
+- Claude Code then re-ran the suite (108 passed) and checked that `tests/test_trashcan.py` tags all of AC 1–20. It did not review each test's assertions in detail.
+
+**Q:** Approximate proportion of AI-generated vs. human content?
+
+**A:** `tests/test_trashcan.py` and the updated `docs/verification-report.md` are entirely AI-generated. The student wrote the prompt and approved the agents' plans. **[TEAM: any edits you made to the tests or report]**
+
+**Q:** Any other disclosures required by the AI policy?
+
+**A:** Some acceptance criteria describe page behavior: the confirmation text (AC 9, 10) and the slideshow/random viewer dropping a trashed picture (AC 20). pytest exercises only the server routes, so those parts need a manual browser check. **[TEAM: who did the browser check and who reviewed the tests for correctness]**
